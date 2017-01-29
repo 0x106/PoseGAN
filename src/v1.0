@@ -1,0 +1,241 @@
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
+
+import random
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.autograd import Variable
+import torch.nn.functional as F
+
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+
+class _netD(nn.Module):
+    def __init__(self):
+        super(_netD, self).__init__()
+
+        self.nz = 3
+        self.nhl = 4
+        self.nh = [100, 400, 200, 300]
+        self.no = 1
+
+        self.input = nn.Linear(self.nz, self.nh[0])
+
+        self.fc = []
+        for i in range(self.nhl-1):
+            self.fc.append(nn.Linear(self.nh[i], self.nh[i+1]))
+
+        self.fc2 = nn.Linear(self.nh[0], self.nh[1])
+        self.output = nn.Linear(self.nh[self.nhl-1], self.no)
+
+        self.drop = nn.Dropout(p=0.5)
+
+    def forward(self, _input):
+        x = self.drop(F.relu(self.input((_input))))
+
+        # x = self.drop(F.relu(self.fc2((x))))
+
+        for i in range(self.nhl-1):
+            x = self.drop(F.relu(self.fc[i]((x))))
+
+        output = F.sigmoid(self.output(x))
+
+        return output
+
+class _netG(nn.Module):
+    def __init__(self):
+        super(_netG, self).__init__()
+
+        self.nz = 5
+        self.nh = [100, 400]
+        self.no = 3
+
+        self.fc1 = nn.Linear(self.nz, self.nh[0])
+        self.fc2 = nn.Linear(self.nh[0], self.nh[1])
+        self.fc3 = nn.Linear(self.nh[1], self.no)
+
+        # self.bn1  = nn.BatchNorm1d(self.nz)
+        # self.bn2  = nn.BatchNorm1d(self.nh[1])
+
+        self.drop = nn.Dropout(p=0.5)
+
+    def forward(self, _input):
+
+        # apply batch norm, then pass through layer,
+        # apply non-linearity and then drop units
+        x = self.drop(F.relu(self.fc1((_input))))
+        x = self.drop(F.relu(self.fc2((x))))
+
+        output = self.fc3(x)
+
+        return output
+
+def gen_data(N):
+    s = np.random.normal(0., 1., 3*N/4)
+    r = np.random.normal(10., 1., N/4)
+
+    return shuffle(np.concatenate((s, r)))
+
+def add_noise(_data, _N):
+    noise = np.random.rand(_N, 3) - 0.5
+    return _data + noise
+
+def numpy_to_tensor(_data):
+    output_tensor = torch.FloatTensor(_data.shape[0], _data.shape[1])
+    for i in range(_data.shape[0]):
+        for k in range(_data.shape[1]):
+            output_tensor[i][k] = _data[i,k]
+    return output_tensor
+
+def shuffle(_data):
+    np.random.shuffle(_data)
+    return _data
+
+def readData(_files, _num_frames):
+    output = '/helix/GAN/data/temp.amc'
+    
+    if len(_files) == 0:
+        _files = ['/helix/GAN/data/06_01.amc']
+
+    print '\t-', _files[0]
+
+    data = []
+    for fidx, f in enumerate(_files):
+        file = open(f)
+        out = open(output, 'w')
+        lines = [line.split() for line in file]
+        for i in range(3, len(lines)):
+            if len(lines[i]) == 1:
+                for k in range(1,28):
+                    for j in range(1, len(lines[i+k])):
+                        out.write(lines[i+k][j])
+                        out.write(' ')
+                out.write('\n')
+        out.close()
+        file = open(output)
+        lines = [[float(x) for x in line.split()] for line in file]
+        print 'reading data:', _num_frames, 'of (', len(lines), ') frames.'
+        data.append(np.zeros((_num_frames, len(lines[0]))))
+        index = np.linspace(0, len(lines)-1, num=_num_frames).astype(int)
+        for i in range(_num_frames):
+            for k in range(len(lines[0])):
+                data[fidx][i,k] = lines[index[i]][k]
+
+        # data[fidx] = data[fidx].T
+
+    return data[0][:, :3]
+
+data = gen_data(1000)
+count, bins, ignored = plt.hist(data, 300, normed=True)
+plt.show()
+
+# print 'Getting AMC file for subject:'
+
+# data = readData([], 400)
+
+# x, y, z = data[:, 1], data[:, 2], data[:, 0]
+
+# netG = _netG()
+# netD = _netD()
+
+# criterion = nn.BCELoss()
+# optimizerD = optim.Adam(netD.parameters(), lr = 0.01)
+# optimizerG = optim.Adam(netG.parameters(), lr = 0.01)
+
+# epochs, batch_size = 20, 10
+# num_iters = data.shape[0] / batch_size
+# real_label, fake_label = 1,0
+
+# data = numpy_to_tensor(shuffle(data))
+
+# D_input = torch.FloatTensor(batch_size, 3) # input to D
+# label = torch.FloatTensor(batch_size, 1) # labels output from D
+# G_input = torch.FloatTensor(batch_size, 5) # input to G
+
+# D_input = Variable(D_input)
+# label = Variable(label)
+# G_input = Variable(G_input)
+
+# for e in range(epochs):
+
+#     idx = 0
+#     for i in range(num_iters):
+
+#         # ===== TRAIN DISCRIMINATOR ====== #
+#         # ----- train with real data ----- # 
+#         netD.zero_grad()
+
+#         # train D on a real example (i.e one sample from 'data')
+#         D_input.data.copy_(data[idx:idx+batch_size, :])
+#         label.data.fill_(real_label)
+
+#         D_real_output = netD(D_input)
+#         D_real_error  = criterion(D_real_output, label)
+
+#         D_real_error.backward()
+#         D_x = D_real_output.data.mean()
+
+#         # ----- train with fake data ----- #
+#         G_input.data.normal_(0., 1.)
+#         label.data.fill_(fake_label)
+
+#         # pass random noise through G
+#         G_output = netG(G_input).detach()
+
+#         # pass G output through D
+#         D_fake_output = netD(G_output)
+
+#         # compute the D error
+#         D_fake_error = criterion(D_fake_output, label)
+#         D_fake_error.backward()
+
+#         D_G_z1 = D_fake_output.data.mean()
+#         D_error = D_fake_error + D_real_error
+
+#         optimizerD.step()
+
+#         # ======== TRAIN GENERATOR ======= #
+#         netG.zero_grad()
+
+#         G_input.data.normal_(0., 1.)
+#         label.data.fill_(real_label)
+
+#         G_output = netG(G_input)
+#         D_output = netD(G_output)
+
+#         G_error = criterion(D_output, label)
+
+#         G_error.backward()
+
+#         D_G_z2 = D_output.data.mean()
+
+#         optimizerG.step()
+
+#         print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
+#               % (e, epochs, i, num_iters,
+#                  D_error.data[0], G_error.data[0], D_x, D_G_z1, D_G_z2))
+
+#         # -------------- end ------------- #
+#         idx += batch_size
+
+# num_evals = 100
+# netG.eval()
+# fake_data = np.zeros((num_evals, 3))
+
+# for i in range(100):
+#     G_input.data.normal_(0., 1.)
+#     G_output = netG(G_input)
+#     fake_data[i, 0] = G_output.data[0][0]
+#     fake_data[i, 1] = G_output.data[0][1]
+#     fake_data[i, 2] = G_output.data[0][2]
+
+# x_, y_, z_ = fake_data[:,1], fake_data[:,2], fake_data[:,0]
+
+# ax.plot(x, y, z, '+')
+# ax.plot(x_, y_, z_, '+')
+
+# plt.show()
+
+
